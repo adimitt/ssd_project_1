@@ -17,11 +17,21 @@ design — the brief asks for the data engineering, not a service around it.
 | **Team number** | `<FILL IN>` |
 | **Project number** | 1 — BiteStream (`project_no = (team_no % 5) + 1`, so `team_no % 5 == 0`) |
 | **Members** | `<NAME, ROLL NO>` · `<NAME, ROLL NO>` · `<NAME, ROLL NO>` · `<NAME, ROLL NO>` |
-| **GitHub repository** | `<FILL IN: https://github.com/…>` |
-| **Final commit hash** | `<FILL IN: generate with `git rev-parse HEAD` AFTER the last push>` |
+| **GitHub repository** | **https://github.com/adimitt/ssd_project_1** (public) |
+| **Deliverables commit** | `277ce02a2ffc19138ef1d7e9d449c1bd39fe6279` |
+| **Submission tag** | `submission` — `git checkout submission` resolves to the exact graded tree |
 
-> The commit hash must be generated **after** the final push, or it will not match what
-> the graders clone. Do this last.
+> **On the commit hash.** Writing a hash into the README necessarily changes the hash, so the
+> value above is the commit containing **all deliverables**; the only commit after it is the one
+> that added this line. The annotated tag `submission` is the unambiguous pointer — it is created
+> last and resolves to the exact tree the graders should read.
+>
+> After filling in the team details below, re-stamp with:
+> ```
+> git add -A && git commit -m "submission: team details"
+> git tag -f -a submission -m "final submission" && git push && git push -f origin submission
+> git rev-parse HEAD          # <- paste this into Moodle
+> ```
 
 ### Verified environment
 
