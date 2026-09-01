@@ -174,3 +174,35 @@ full rebuild.
 7. How would you keep this fresh in production? What is your staleness budget?
 8. `MATERIALIZED VIEW` vs `VIEW` vs a summary table — when would you pick each?
 9. What happens if you create the view `WITH NO DATA` and immediately refresh concurrently?
+
+
+---
+
+## Addendum — both refresh forms exist
+
+The brief says *"Write a **function** to REFRESH CONCURRENTLY this view."* The project ships
+both, because satisfying the literal wording costs twelve lines and removes any argument:
+
+| | `fn_refresh_restaurant_performance()` | `sp_refresh_restaurant_performance()` |
+|---|---|---|
+| Kind | `FUNCTION` — the brief's wording | `PROCEDURE` |
+| Invoke | `SELECT fn_refresh_restaurant_performance();` | `CALL sp_refresh_restaurant_performance();` |
+| Returns | row count (`BIGINT`) | nothing; `RAISE NOTICE` |
+| Transaction | runs **inside the caller's** | gets its **own** when CALLed from autocommit |
+| Can `COMMIT` | no | yes |
+
+**Verified on PostgreSQL 17.11:** a plain `FUNCTION` executes
+`REFRESH MATERIALIZED VIEW CONCURRENTLY` successfully both in autocommit **and** inside an
+explicit `BEGIN … COMMIT` block. There is no technical barrier — the choice is operational.
+
+### The viva answer for "why would you use one over the other?"
+
+`REFRESH … CONCURRENTLY` takes an `EXCLUSIVE` lock. In the **function** form that lock is
+held until the **caller's** transaction commits, not until the refresh finishes — so a caller
+sitting in a long transaction stretches the lock window far beyond the actual work. In the
+**procedure** form, called from autocommit, the refresh owns its transaction and the lock is
+released the instant it completes.
+
+Rule of thumb: call the **function** when you are already inside a transaction and want the
+refresh to be part of it; `CALL` the **procedure** for scheduled or standalone refreshes.
+That is why a `pg_cron` job should use the procedure.

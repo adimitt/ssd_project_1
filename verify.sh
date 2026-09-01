@@ -57,6 +57,9 @@ check "2 covering indexes"       "$(q "SELECT count(*) FROM pg_indexes WHERE ind
 check "materialized view"        "$(q "SELECT count(*) FROM pg_matviews WHERE matviewname='mv_restaurant_performance'")" '^1$'
 check "MV unique index (needed by REFRESH CONCURRENTLY)" "$(q "SELECT count(*) FROM pg_indexes WHERE indexname='ux_mv_rest_perf'")" '^1$'
 check "2 procedures"             "$(q "SELECT count(*) FROM pg_proc WHERE proname IN ('sp_execute_checkout','sp_refresh_restaurant_performance') AND prokind='p'")" '^2$'
+# The brief asks for a FUNCTION to refresh the view; the PROCEDURE is the better
+# operational form. Both exist, so assert both rather than arguing about the wording.
+check "MV refresh FUNCTION (brief wording)" "$(q "SELECT count(*) FROM pg_proc WHERE proname='fn_refresh_restaurant_performance' AND prokind='f'")" '^1$'
 
 head_ "3. Data volumes (brief requires 100k+ rows and 500k+ pings)"
 ORD=$(q 'SELECT count(*) FROM orders'); AUD=$(q 'SELECT count(*) FROM wallet_audit_logs')
