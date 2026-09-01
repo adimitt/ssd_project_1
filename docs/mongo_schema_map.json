@@ -1,0 +1,260 @@
+{
+  "$comment": [
+    "BiteStream :: docs/mongo_schema_map.json",
+    "",
+    "This file is the SINGLE SOURCE OF TRUTH for the MongoDB side of the project.",
+    "It is not documentation that describes the code - it is the definition the code reads:",
+    "  * mongo/01_collections_and_indexes.js loads it and applies every validator and index",
+    "  * data_generation/mongo_seeder.py     loads it to recreate the collections and indexes",
+    "Editing this file changes the database. Nothing else defines the Mongo schema.",
+    "",
+    "Cross-database contract: restaurant_id, user_id and order_id are opaque copies of the",
+    "PostgreSQL BIGINT primary keys. MongoDB enforces nothing about them - see README."
+  ],
+
+  "database": "bitestream",
+
+  "collections": {
+
+    "Menus": {
+      "purpose": "Flexible per-restaurant catalogue: nested categories -> items -> customisation add-ons.",
+      "embed_or_reference": "EMBED. A menu is always read whole, always for one restaurant, and is bounded well under the 16 MB BSON document limit. Embedding makes it a single-document read with no $lookup. The rule applied: embed when the child is bounded, always read with the parent and updated with it; reference when it is unbounded or independently queried. DriverPings is the counter-example.",
+      "example": {
+        "restaurant_id": 42,
+        "name": "Sharma Biryani House",
+        "city": "Hyderabad",
+        "location": {"type": "Point", "coordinates": [78.4867, 17.385]},
+        "version": 3,
+        "updated_at": "ISODate(...)",
+        "categories": [
+          {
+            "name": "Biryani",
+            "items": [
+              {
+                "item_id": "r42-i7",
+                "name": "Hyderabadi Dum Biryani",
+                "price": "NumberDecimal(\"329.00\")",
+                "veg": false,
+                "tags": ["bestseller", "spicy"],
+                "addons": [
+                  {
+                    "group": "Spice level",
+                    "min": 0,
+                    "max": 1,
+                    "options": [
+                      {"name": "Extra hot", "price": "NumberDecimal(\"0.00\")"}
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "title": "Menu",
+          "required": ["restaurant_id", "name", "location", "version", "updated_at", "categories"],
+          "properties": {
+            "restaurant_id": {"bsonType": ["int", "long"], "description": "PostgreSQL restaurants.id"},
+            "name": {"bsonType": "string"},
+            "city": {"bsonType": "string"},
+            "location": {
+              "bsonType": "object",
+              "required": ["type", "coordinates"],
+              "description": "The restaurant's own coordinates, copied from PostgreSQL. Denormalised here so Workflow 3 can find its search origin without a cross-database query.",
+              "properties": {
+                "type": {"enum": ["Point"]},
+                "coordinates": {"bsonType": "array", "minItems": 2, "maxItems": 2, "items": {"bsonType": "double"}, "description": "[longitude, latitude]"}
+              }
+            },
+            "version": {"bsonType": "int", "minimum": 1},
+            "updated_at": {"bsonType": "date"},
+            "categories": {
+              "bsonType": "array",
+              "minItems": 1,
+              "items": {
+                "bsonType": "object",
+                "required": ["name", "items"],
+                "properties": {
+                  "name": {"bsonType": "string"},
+                  "items": {
+                    "bsonType": "array",
+                    "items": {
+                      "bsonType": "object",
+                      "required": ["item_id", "name", "price"],
+                      "properties": {
+                        "item_id": {"bsonType": "string"},
+                        "name": {"bsonType": "string"},
+                        "price": {"bsonType": "decimal", "description": "Decimal128, mirroring Postgres NUMERIC. Never a double."},
+                        "veg": {"bsonType": "bool"},
+                        "tags": {"bsonType": "array", "items": {"bsonType": "string"}},
+                        "addons": {
+                          "bsonType": "array",
+                          "items": {
+                            "bsonType": "object",
+                            "required": ["group", "options"],
+                            "properties": {
+                              "group": {"bsonType": "string"},
+                              "min": {"bsonType": "int", "minimum": 0},
+                              "max": {"bsonType": "int", "minimum": 0},
+                              "options": {
+                                "bsonType": "array",
+                                "items": {
+                                  "bsonType": "object",
+                                  "required": ["name", "price"],
+                                  "properties": {
+                                    "name": {"bsonType": "string"},
+                                    "price": {"bsonType": "decimal"}
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "validationLevel": "strict",
+      "validationAction": "error",
+      "indexes": [
+        {
+          "name": "ux_menus_restaurant",
+          "keys": [["restaurant_id", 1]],
+          "options": {"unique": true},
+          "rationale": "One live menu document per restaurant; also the only access path this collection has."
+        },
+        {
+          "name": "ix_menus_item_name",
+          "keys": [["categories.items.name", 1]],
+          "options": {},
+          "rationale": "Multikey index across two levels of array nesting: 'which restaurants sell X'."
+        }
+      ]
+    },
+
+    "Reviews": {
+      "purpose": "Customer reviews with a 1-5 rating, free-text body, sentiment label and a tag array. Input to Workflow 4.",
+      "embed_or_reference": "SEPARATE COLLECTION. Reviews are unbounded per restaurant and are queried independently of the menu, so embedding them in Menus would grow that document without limit and violate the 16 MB cap.",
+      "example": {
+        "restaurant_id": 42,
+        "order_id": 91827,
+        "user_id": 3310,
+        "rating": 4,
+        "text": "Arrived hot and on time.",
+        "tags": ["fast-delivery", "hot-food", "good-packaging"],
+        "sentiment": "POSITIVE",
+        "created_at": "ISODate(...)"
+      },
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "title": "Review",
+          "required": ["restaurant_id", "user_id", "rating", "tags", "sentiment", "created_at"],
+          "properties": {
+            "restaurant_id": {"bsonType": ["int", "long"], "description": "PostgreSQL restaurants.id"},
+            "order_id": {"bsonType": ["int", "long"], "description": "PostgreSQL orders.id"},
+            "user_id": {"bsonType": ["int", "long"], "description": "PostgreSQL users.id"},
+            "rating": {"bsonType": "int", "minimum": 1, "maximum": 5, "description": "Star rating, 1-5 inclusive."},
+            "text": {"bsonType": "string"},
+            "tags": {"bsonType": "array", "items": {"bsonType": "string"}},
+            "sentiment": {"enum": ["POSITIVE", "NEUTRAL", "NEGATIVE"]},
+            "created_at": {"bsonType": "date"}
+          }
+        }
+      },
+      "validationLevel": "strict",
+      "validationAction": "error",
+      "indexes": [
+        {
+          "name": "ix_reviews_restaurant_recent",
+          "keys": [["restaurant_id", 1], ["created_at", -1]],
+          "options": {},
+          "rationale": "WORKFLOW 4's leading $match. Critical: $facet sub-pipelines cannot use indexes, so this is the only index the faceted aggregation can ever benefit from."
+        },
+        {
+          "name": "ix_reviews_tags",
+          "keys": [["tags", 1]],
+          "options": {},
+          "rationale": "Multikey index for tag-filtered review searches."
+        },
+        {
+          "name": "ix_reviews_rating",
+          "keys": [["rating", 1]],
+          "options": {},
+          "rationale": "Rating histogram / low-rating alerting."
+        }
+      ]
+    },
+
+    "DriverPings": {
+      "purpose": "High-volume real-time driver telemetry in GeoJSON Point form. Input to Workflow 3.",
+      "embed_or_reference": "SEPARATE COLLECTION, and deliberately transient. Volume is unbounded and write-heavy, so it cannot be embedded anywhere. The TTL index makes the collection self-pruning: telemetry is intentionally lossy.",
+      "example": {
+        "driver_id": 137,
+        "order_id": 91827,
+        "status": "ACTIVE",
+        "location": {"type": "Point", "coordinates": [78.4867, 17.3850]},
+        "speed_kmph": 24.5,
+        "created_at": "ISODate(...)"
+      },
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "title": "DriverPing",
+          "required": ["driver_id", "status", "location", "created_at"],
+          "properties": {
+            "driver_id": {"bsonType": ["int", "long"]},
+            "order_id": {"bsonType": ["int", "long", "null"], "description": "PostgreSQL orders.id, or null when the driver is idle."},
+            "status": {"enum": ["ACTIVE", "IDLE", "OFFLINE"]},
+            "location": {
+              "bsonType": "object",
+              "required": ["type", "coordinates"],
+              "properties": {
+                "type": {"enum": ["Point"], "description": "2dsphere requires valid GeoJSON."},
+                "coordinates": {
+                  "bsonType": "array",
+                  "minItems": 2,
+                  "maxItems": 2,
+                  "items": {"bsonType": "double"},
+                  "description": "[longitude, latitude] - LONGITUDE FIRST. Reversing them is the single most common bug in this assignment; the query then silently returns nothing."
+                }
+              }
+            },
+            "speed_kmph": {"bsonType": ["double", "int"], "minimum": 0},
+            "created_at": {"bsonType": "date", "description": "MUST be a BSON Date. A date STRING is silently ignored by the TTL monitor and nothing ever expires."}
+          }
+        }
+      },
+      "validationLevel": "strict",
+      "validationAction": "error",
+      "indexes": [
+        {
+          "name": "ix_pings_geo",
+          "keys": [["location", "2dsphere"]],
+          "options": {},
+          "rationale": "WORKFLOW 3. 2dsphere is spherical and earth-aware and understands GeoJSON; the legacy 2d index is planar coordinate pairs and cannot return real distances in metres."
+        },
+        {
+          "name": "ix_pings_ttl",
+          "keys": [["created_at", 1]],
+          "options": {"expireAfterSeconds": 7200},
+          "rationale": "2-hour TTL. Single-field only (a TTL index can never be compound); the field must be a BSON Date; the background reaper runs roughly every 60 seconds so expiry is approximate, not instant."
+        },
+        {
+          "name": "ix_pings_driver_recent",
+          "keys": [["driver_id", 1], ["created_at", -1]],
+          "options": {},
+          "rationale": "Latest-ping-per-driver lookups and the per-driver dedup in Workflow 3."
+        }
+      ]
+    }
+  }
+}

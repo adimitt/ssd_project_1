@@ -1,0 +1,41 @@
+# ---- Python -------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.Python
+
+# ---- Environment / secrets ----------------------------------------------------------
+.env
+.env.*
+!.env.example
+
+# ---- OS -----------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+
+# ---- Editors ------------------------------------------------------------------------
+.idea/
+.vscode/
+*.swp
+
+# ---- Database artefacts ---------------------------------------------------------------
+# The brief FORBIDS these in the submission: only the generation scripts may be shipped,
+# never the generated data.
+*.dump
+*.sql.gz
+*.bson
+*.csv
+*.tsv
+pgdata/
+mongodata/
+dump/
+
+# ---- Local scratch ---------------------------------------------------------------------
+*.log
+.preview.html
+
+# NOTE: performance/postgres_explain_analyzes.txt and performance/mongo_execution_stats.json
+# ARE committed on purpose - they are the graded "Performance Proof" deliverable.
