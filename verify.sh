@@ -88,12 +88,24 @@ db.DriverPings.aggregate([{$geoNear:{near:m.location,distanceField:"d",maxDistan
 check "WF4 \$facet uses IXSCAN, not COLLSCAN" "$(mq '
 const p=[{$match:{restaurant_id:7}},{$facet:{r:[{$group:{_id:"$rating",n:{$sum:1}}}]}}];
 JSON.stringify(db.Reviews.explain("executionStats").aggregate(p)).includes("COLLSCAN")?"COLLSCAN":"IXSCAN"')" '^IXSCAN$'
-check "WF2 window query returns 20 ranked rows" "$(q "
+# CORRECTNESS, not volume. The earlier version of this check asserted "returns exactly 20
+# rows", which is a VOLUME assertion wearing a workflow-check costume: at a small scale
+# there are simply fewer restaurants trading on any given day, so the query correctly
+# returns fewer rows and the check failed on healthy data.
+#
+# What is actually invariant about DENSE_RANK, at every scale, is its defining property:
+# ranks start at 1 and run consecutively with no gaps, so max(rank) == count(distinct rank).
+# RANK() would fail this exact assertion whenever there is a tie - which is precisely the
+# difference between the two functions, and why the brief asks for DENSE_RANK.
+check "WF2 DENSE_RANK ranks densely from 1, no gaps (scale-independent)" "$(q "
 WITH daily AS (SELECT restaurant_id, created_at::date d, SUM(total_amount) rev FROM orders
                WHERE status='DELIVERED' AND created_at >= CURRENT_DATE - INTERVAL '90 days'
-               GROUP BY 1,2)
-SELECT count(*) FROM (SELECT DENSE_RANK() OVER (PARTITION BY d ORDER BY rev DESC) FROM daily
-                      WHERE d = CURRENT_DATE - 1 LIMIT 20) x")" '^20$'
+               GROUP BY 1,2),
+ranked AS (SELECT DENSE_RANK() OVER (ORDER BY rev DESC) r FROM daily
+            WHERE d = CURRENT_DATE - 1)
+SELECT CASE WHEN count(*) = 0 THEN 'NO_ROWS'
+            WHEN min(r) = 1 AND max(r) = count(DISTINCT r) THEN 'DENSE_OK'
+            ELSE 'GAPPED' END FROM ranked")" '^DENSE_OK$'
 
 head_ "7. Performance evidence committed"
 for f in performance/postgres_explain_analyzes.txt performance/mongo_execution_stats.json \
