@@ -120,6 +120,25 @@ check "no Seq Scan on orders in the captured WF2 plan" \
 check "captured WF2 plan shows Index Only Scan" \
       "$(sed -n '/\[1\] WORKFLOW 2/,/\[1b\]/p' performance/postgres_explain_analyzes.txt 2>/dev/null | grep -c 'Index Only Scan')" '^[1-9]'
 
+# --- documentation must not drift from measured evidence ------------------------------
+# The README's dataset table is hand-written; the capture is machine-generated. An earlier
+# version of the README claimed 499,800 pings (the loader's progress line) when the seeder
+# actually produced 500,000, and nothing caught it. This check makes that class of error
+# impossible to ship: the figure quoted in the README must equal the figure in the
+# committed capture, and both must clear the brief's 500,000 threshold.
+# Match only the dataset-table row: a `DriverPings` cell followed by a bolded number,
+# then read the first number AFTER the DriverPings label (the same row also carries the
+# unrelated "active orders" count in its left half).
+DOC_PINGS=$(grep -E '`DriverPings`[^|]*\|[^|]*\*\*[0-9,]+\*\*' README.md \
+            | sed 's/.*`DriverPings`//' | grep -oE '[0-9][0-9,]*' | head -1 | tr -d ',')
+CAP_PINGS=$(python3 -c "import json;print(json.load(open('performance/mongo_execution_stats.json'))['collection_sizes']['DriverPings'])" 2>/dev/null)
+check "README ping count matches the committed capture" "${DOC_PINGS:-x}-${CAP_PINGS:-y}" "^${CAP_PINGS}-${CAP_PINGS}$"
+if [ "${CAP_PINGS:-0}" -ge 500000 ] 2>/dev/null; then
+    ok "captured ping count clears the brief's 500,000 threshold ($CAP_PINGS)"
+else
+    bad "captured ping count ${CAP_PINGS:-?} is below the required 500,000"
+fi
+
 echo ""
 echo "======================================================================"
 printf " %d passed, %d failed\n" "$PASS" "$FAIL"

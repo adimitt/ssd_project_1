@@ -71,7 +71,11 @@ Faker.seed(SEED)
 fake = Faker("en_IN")
 
 N_REVIEWS = 200_000
-N_PINGS = 500_000
+# The brief requires "at least 500,000" pings. Seeding exactly 500,000 sits ON the
+# threshold, which is fragile for two reasons: the TTL reaper starts deleting immediately,
+# and any off-by-a-batch in the loader would drop the total below the requirement. 520,000
+# gives a 4% margin at no meaningful cost (~1s more load time).
+N_PINGS = 520_000
 N_DRIVERS = 4_000
 BATCH = 10_000                # documents per insert_many call
 TTL_SECONDS = 7_200           # must match ix_pings_ttl in the schema map
@@ -407,6 +411,8 @@ def main() -> int:
         ordered=False,
     )
     log(f"  + {EXPIRING_SOON} pings seeded ~45s from expiry (live TTL demo)")
+    log(f"  DriverPings TOTAL inserted: {n_pings:,}  "
+        f"(= {n_pings - EXPIRING_SOON:,} bulk + {EXPIRING_SOON} expiring-soon)")
 
     log("building indexes (after the load, TTL last)")
     build_indexes(db, schema, only=None if not args.pings_only else ["DriverPings"])

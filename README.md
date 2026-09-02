@@ -14,7 +14,7 @@ design — the brief asks for the data engineering, not a service around it.
 
 | | |
 |---|---|
-| **Team number** | `<FILL IN>` |
+| **Team number** | **5** |
 | **Project number** | 1 — BiteStream (`project_no = (team_no % 5) + 1`, so `team_no % 5 == 0`) |
 | **Members** | `<NAME, ROLL NO>` · `<NAME, ROLL NO>` · `<NAME, ROLL NO>` · `<NAME, ROLL NO>` |
 | **GitHub repository** | **https://github.com/adimitt/ssd_project_1** (public) |
@@ -185,19 +185,26 @@ The brief asks twice for assumptions to be listed. These are ours.
 
 | Relation | Rows | | Collection | Documents |
 |---|---:|---|---|---:|
-| `orders` | 300,226 | | `Menus` | 1,000 |
-| — `DELIVERED` | 294,016 | | `Reviews` | 200,000 |
-| — active | 6,210 | | `DriverPings` | 499,800 |
-| `wallet_audit_logs` | 150,232 | | | |
-| `users` | 50,003 | | **Total documents** | **700,800** |
+| `orders` | 300,223 | | `Menus` | 1,000 |
+| — `DELIVERED` | 294,013 | | `Reviews` | 200,000 |
+| — active | 6,210 | | `DriverPings` | **520,000** |
+| `wallet_audit_logs` | 150,229 | | | |
+| `users` | 50,003 | | **Total documents** | **721,000** |
 | `restaurants` | 1,002 | | | |
-| `checkout_attempts` | 402 | | Mongo data + indexes | 172 MB |
-| **Total relational rows** | **501,865** | | PostgreSQL database | 114 MB |
+| `checkout_attempts` | 402 | | Mongo data + indexes | 177 MB |
+| **Total relational rows** | **501,859** | | PostgreSQL database | 110 MB |
 
-Both the "100k+ rows" and "500k+ pings" requirements are cleared with margin.
+Against the brief's Step 4 thresholds: **100,000+ ledger entries** (150,229 ✓),
+**50,000+ orders** (300,223 ✓), **500,000+ geospatial pings** (520,000 ✓).
+
+> The ping count is deliberately **520,000, not exactly 500,000**. Sitting on the threshold
+> is fragile: the TTL reaper begins deleting the moment the load finishes, so a live count
+> taken minutes later is already below it. The 4% margin makes the requirement unambiguous
+> at capture time. `verify.sh` asserts this table matches `performance/mongo_execution_stats.json`,
+> so the documented figure cannot drift from the measured one.
 Full build time on the reference machine: **PostgreSQL ~11 s, MongoDB ~13 s.**
 
-**Every one of the 150,232 ledger rows was written by the trigger.** `COPY` does not fire
+**Every one of the 150,229 ledger rows was written by the trigger.** `COPY` does not fire
 an `UPDATE` trigger, so the seeder cannot bulk-load them; instead it issues three
 set-based `UPDATE users SET wallet_balance = wallet_balance + …` statements. A row-level
 trigger fires once per affected row even for a single statement, so each pass produces
@@ -220,7 +227,7 @@ and [`performance/mongo_execution_stats.json`](performance/mongo_execution_stats
 | **MV** — revenue leaderboard | 90.4 ms · 2× Seq Scan + HashAggregate | **0.251 ms** · Index Scan on the MV | **360× faster** |
 | **Partial unique index** — active-order lookup | — | **0.011 ms** · Index Scan | — |
 | **Audit ledger** — per-user history | — | **0.27 ms** · Index Scan, no sort node | — |
-| **WF3** — `$geoNear` 5 km | 500,000 docs · 233 ms | **42,048 docs** · 80 ms | **11.9× fewer docs** |
+| **WF3** — `$geoNear` 5 km | 520,000 docs · 250 ms | **43,442 docs** · 101 ms | **12.0× fewer docs** |
 | **WF4** — `$facet` analytics | 200,000 docs · 49 ms | **220 docs** · 1 ms | **909× fewer docs** |
 | **WF4** — `$match` moved *inside* `$facet` | 200,000 docs · 211 ms | 220 docs · 1 ms | **the rule, measured** |
 
@@ -276,7 +283,7 @@ checkout calls commit moments before the capture. A second `VACUUM` pass takes i
 `$geoNear` searches outwards in expanding rings, which is why one `GEO_NEAR_2DSPHERE`
 stage sits above 44 `IXSCAN`s. **No `COLLSCAN` anywhere.** The control — the equivalent
 bounding-box query pinned to a collection scan with `hint({$natural: 1})`, doing the same
-`$sort`/`$group`/`$limit` work — examines all 500,000 documents in 240 ms.
+`$sort`/`$group`/`$limit` work — examines all 520,000 documents in 250 ms.
 
 There is no "without index" variant of `$geoNear` itself. MongoDB rejects the pipeline:
 

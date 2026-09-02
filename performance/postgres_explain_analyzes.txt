@@ -3,7 +3,7 @@
 =====================================================================
       k      |                v                 
 -------------+----------------------------------
- captured_at | 2026-09-01 13:18:25.666957+05:30
+ captured_at | 2026-09-02 17:58:34.797671+05:30
  version     | 17.11 (Homebrew)
  orders rows | 300225
  audit rows  | 150231
@@ -18,20 +18,20 @@
 =====================================================================
                                                                               QUERY PLAN                                                                               
 -----------------------------------------------------------------------------------------------------------------------------------------------------------------------
- HashAggregate  (cost=3813.05..5245.50 rows=53612 width=52) (actual time=16.755..27.190 rows=37768 loops=1)
+ HashAggregate  (cost=3845.92..5290.90 rows=54081 width=52) (actual time=16.627..26.982 rows=37886 loops=1)
    Output: restaurant_id, ((created_at)::date), sum(total_amount), count(*)
    Group Key: o.restaurant_id, (o.created_at)::date
    Planned Partitions: 4  Batches: 5  Memory Usage: 8241kB  Disk Usage: 1584kB
-   Buffers: shared hit=272, temp read=120 written=281
-   ->  Index Only Scan using idx_orders_delivered_date_rest on public.orders o  (cost=0.43..1513.60 rows=53612 width=18) (actual time=0.021..7.548 rows=49070 loops=1)
+   Buffers: shared hit=269, temp read=120 written=284
+   ->  Index Only Scan using idx_orders_delivered_date_rest on public.orders o  (cost=0.43..1526.35 rows=54081 width=18) (actual time=0.022..7.383 rows=49179 loops=1)
          Output: restaurant_id, (created_at)::date, total_amount
          Index Cond: ((o.created_at >= (CURRENT_DATE - '90 days'::interval)) AND (o.created_at < (CURRENT_DATE + '1 day'::interval)))
          Heap Fetches: 525
-         Buffers: shared hit=272
+         Buffers: shared hit=269
  Planning:
-   Buffers: shared hit=95
- Planning Time: 0.350 ms
- Execution Time: 29.301 ms
+   Buffers: shared hit=89
+ Planning Time: 0.400 ms
+ Execution Time: 29.250 ms
 (14 rows)
 
 
@@ -41,16 +41,16 @@
 ---------------------------------------------------------------------
                                                                               QUERY PLAN                                                                               
 -----------------------------------------------------------------------------------------------------------------------------------------------------------------------
- HashAggregate  (cost=14089.67..15522.12 rows=53612 width=52) (actual time=81.484..92.319 rows=37768 loops=1)
+ HashAggregate  (cost=14110.96..15555.93 rows=54081 width=52) (actual time=78.918..89.415 rows=37886 loops=1)
    Group Key: restaurant_id, (created_at)::date
-   Planned Partitions: 4  Batches: 5  Memory Usage: 8241kB  Disk Usage: 1552kB
-   Buffers: shared hit=3400, temp read=108 written=271
-   ->  Seq Scan on orders o  (cost=0.00..11790.22 rows=53612 width=18) (actual time=0.006..69.994 rows=49070 loops=1)
+   Planned Partitions: 4  Batches: 5  Memory Usage: 8241kB  Disk Usage: 1560kB
+   Buffers: shared hit=3400, temp read=108 written=269
+   ->  Seq Scan on orders o  (cost=0.00..11791.39 rows=54081 width=18) (actual time=0.006..66.167 rows=49179 loops=1)
          Filter: (((status)::text = 'DELIVERED'::text) AND (created_at >= (CURRENT_DATE - '90 days'::interval)) AND (created_at < (CURRENT_DATE + '1 day'::interval)))
-         Rows Removed by Filter: 251155
+         Rows Removed by Filter: 251046
          Buffers: shared hit=3400
- Planning Time: 0.085 ms
- Execution Time: 96.880 ms
+ Planning Time: 0.077 ms
+ Execution Time: 91.201 ms
 (10 rows)
 
 
@@ -60,59 +60,59 @@
 =====================================================================
                                                                                   QUERY PLAN                                                                                  
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
- Limit  (cost=52075.96..52076.01 rows=20 width=84) (actual time=184.472..184.477 rows=20 loops=1)
-   Buffers: shared hit=263, temp read=455 written=617
+ Limit  (cost=52323.50..52323.55 rows=20 width=84) (actual time=186.660..186.666 rows=20 loops=1)
+   Buffers: shared hit=260, temp read=455 written=620
    CTE daily
-     ->  HashAggregate  (cost=3813.05..5245.50 rows=53612 width=52) (actual time=15.569..26.177 rows=37768 loops=1)
+     ->  HashAggregate  (cost=3845.92..5290.90 rows=54081 width=52) (actual time=15.542..25.946 rows=37886 loops=1)
            Group Key: o.restaurant_id, (o.created_at)::date
            Planned Partitions: 4  Batches: 5  Memory Usage: 8241kB  Disk Usage: 1584kB
-           Buffers: shared hit=263, temp read=120 written=281
-           ->  Index Only Scan using idx_orders_delivered_date_rest on orders o  (cost=0.43..1513.60 rows=53612 width=18) (actual time=0.021..7.007 rows=49070 loops=1)
+           Buffers: shared hit=260, temp read=120 written=284
+           ->  Index Only Scan using idx_orders_delivered_date_rest on orders o  (cost=0.43..1526.35 rows=54081 width=18) (actual time=0.020..6.656 rows=49179 loops=1)
                  Index Cond: ((created_at >= (CURRENT_DATE - '90 days'::interval)) AND (created_at < (CURRENT_DATE + '1 day'::interval)))
                  Heap Fetches: 24
-                 Buffers: shared hit=263
-   ->  Sort  (cost=46830.46..46833.81 rows=1340 width=84) (actual time=184.470..184.473 rows=20 loops=1)
+                 Buffers: shared hit=260
+   ->  Sort  (cost=47032.60..47035.98 rows=1352 width=84) (actual time=186.659..186.662 rows=20 loops=1)
          Sort Key: (dense_rank() OVER (?))
          Sort Method: top-N heapsort  Memory: 26kB
-         Buffers: shared hit=263, temp read=455 written=617
-         ->  WindowAgg  (cost=46768.02..46794.81 rows=1340 width=84) (actual time=184.035..184.362 rows=1000 loops=1)
-               Buffers: shared hit=263, temp read=455 written=617
-               ->  Sort  (cost=46768.01..46771.36 rows=1340 width=44) (actual time=184.030..184.066 rows=1000 loops=1)
+         Buffers: shared hit=260, temp read=455 written=620
+         ->  WindowAgg  (cost=46969.61..46996.63 rows=1352 width=84) (actual time=186.227..186.553 rows=1000 loops=1)
+               Buffers: shared hit=260, temp read=455 written=620
+               ->  Sort  (cost=46969.59..46972.97 rows=1352 width=44) (actual time=186.223..186.257 rows=1000 loops=1)
                      Sort Key: windowed.ma7_revenue DESC
                      Sort Method: quicksort  Memory: 70kB
-                     Buffers: shared hit=263, temp read=455 written=617
-                     ->  Subquery Scan on windowed  (cost=28615.14..46698.41 rows=1340 width=44) (actual time=85.008..183.762 rows=1000 loops=1)
+                     Buffers: shared hit=260, temp read=455 written=620
+                     ->  Subquery Scan on windowed  (cost=28675.31..46899.28 rows=1352 width=44) (actual time=86.864..185.976 rows=1000 loops=1)
                            Filter: (windowed.d = (CURRENT_DATE - 1))
                            Rows Removed by Filter: 90000
-                           Buffers: shared hit=263, temp read=455 written=617
-                           ->  WindowAgg  (cost=28615.14..42007.36 rows=268060 width=76) (actual time=84.900..179.725 rows=91000 loops=1)
-                                 Buffers: shared hit=263, temp read=455 written=617
-                                 ->  Merge Left Join  (cost=28614.81..36646.16 rows=268060 width=44) (actual time=84.884..104.917 rows=91000 loops=1)
+                           Buffers: shared hit=260, temp read=455 written=620
+                           ->  WindowAgg  (cost=28675.31..42167.19 rows=270405 width=76) (actual time=86.756..181.915 rows=91000 loops=1)
+                                 Buffers: shared hit=260, temp read=455 written=620
+                                 ->  Merge Left Join  (cost=28674.98..36759.09 rows=270405 width=44) (actual time=86.742..107.060 rows=91000 loops=1)
                                        Merge Cond: ((daily.restaurant_id = dl.restaurant_id) AND (((gs.gs)::date) = dl.d))
-                                       Buffers: shared hit=263, temp read=455 written=617
-                                       ->  Sort  (cost=23331.27..23831.27 rows=200000 width=16) (actual time=70.702..75.814 rows=91000 loops=1)
+                                       Buffers: shared hit=260, temp read=455 written=620
+                                       ->  Sort  (cost=23341.83..23841.83 rows=200000 width=16) (actual time=72.361..77.573 rows=91000 loops=1)
                                              Sort Key: daily.restaurant_id, ((gs.gs)::date)
                                              Sort Method: external merge  Disk: 2680kB
-                                             Buffers: shared hit=263, temp read=455 written=617
-                                             ->  Nested Loop  (cost=1206.28..3718.78 rows=200000 width=16) (actual time=34.886..46.173 rows=91000 loops=1)
-                                                   Buffers: shared hit=263, temp read=120 written=281
-                                                   ->  Function Scan on generate_series gs  (cost=0.01..10.01 rows=1000 width=8) (actual time=0.019..0.025 rows=91 loops=1)
-                                                   ->  Materialize  (cost=1206.27..1209.27 rows=200 width=8) (actual time=0.383..0.417 rows=1000 loops=91)
-                                                         Buffers: shared hit=263, temp read=120 written=281
-                                                         ->  HashAggregate  (cost=1206.27..1208.27 rows=200 width=8) (actual time=34.859..34.912 rows=1000 loops=1)
+                                             Buffers: shared hit=260, temp read=455 written=620
+                                             ->  Nested Loop  (cost=1216.84..3729.34 rows=200000 width=16) (actual time=34.885..46.133 rows=91000 loops=1)
+                                                   Buffers: shared hit=260, temp read=120 written=284
+                                                   ->  Function Scan on generate_series gs  (cost=0.01..10.01 rows=1000 width=8) (actual time=0.016..0.020 rows=91 loops=1)
+                                                   ->  Materialize  (cost=1216.82..1219.82 rows=200 width=8) (actual time=0.383..0.417 rows=1000 loops=91)
+                                                         Buffers: shared hit=260, temp read=120 written=284
+                                                         ->  HashAggregate  (cost=1216.82..1218.82 rows=200 width=8) (actual time=34.864..34.918 rows=1000 loops=1)
                                                                Group Key: daily.restaurant_id
                                                                Batches: 1  Memory Usage: 145kB
-                                                               Buffers: shared hit=263, temp read=120 written=281
-                                                               ->  CTE Scan on daily  (cost=0.00..1072.24 rows=53612 width=8) (actual time=15.570..31.492 rows=37768 loops=1)
-                                                                     Buffers: shared hit=263, temp read=120 written=281
-                                       ->  Sort  (cost=5283.53..5417.56 rows=53612 width=44) (actual time=14.178..15.569 rows=37768 loops=1)
+                                                               Buffers: shared hit=260, temp read=120 written=284
+                                                               ->  CTE Scan on daily  (cost=0.00..1081.62 rows=54081 width=8) (actual time=15.544..31.516 rows=37886 loops=1)
+                                                                     Buffers: shared hit=260, temp read=120 written=284
+                                       ->  Sort  (cost=5333.15..5468.36 rows=54081 width=44) (actual time=14.376..15.721 rows=37886 loops=1)
                                              Sort Key: dl.restaurant_id, dl.d
-                                             Sort Method: quicksort  Memory: 3012kB
-                                             ->  CTE Scan on daily dl  (cost=0.00..1072.24 rows=53612 width=44) (actual time=0.002..2.276 rows=37768 loops=1)
+                                             Sort Method: quicksort  Memory: 3016kB
+                                             ->  CTE Scan on daily dl  (cost=0.00..1081.62 rows=54081 width=44) (actual time=0.003..2.278 rows=37886 loops=1)
  Planning:
    Buffers: shared hit=16
- Planning Time: 0.340 ms
- Execution Time: 189.262 ms
+ Planning Time: 0.250 ms
+ Execution Time: 189.950 ms
 (53 rows)
 
 
@@ -131,7 +131,7 @@ probing user id: 1
    Buffers: shared hit=6
  Planning:
    Buffers: shared hit=8
- Planning Time: 0.055 ms
+ Planning Time: 0.052 ms
  Execution Time: 0.011 ms
 (7 rows)
 
@@ -142,14 +142,14 @@ probing user id: 1
 =====================================================================
                                                                            QUERY PLAN                                                                           
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------
- Limit  (cost=0.28..1.06 rows=20 width=47) (actual time=0.225..0.247 rows=20 loops=1)
+ Limit  (cost=0.28..1.06 rows=20 width=47) (actual time=0.011..0.030 rows=20 loops=1)
    Buffers: shared hit=20 read=1
-   ->  Index Scan using idx_mv_rest_perf_revenue on mv_restaurant_performance  (cost=0.28..39.47 rows=1000 width=47) (actual time=0.225..0.246 rows=20 loops=1)
+   ->  Index Scan using idx_mv_rest_perf_revenue on mv_restaurant_performance  (cost=0.28..39.47 rows=1000 width=47) (actual time=0.011..0.029 rows=20 loops=1)
          Buffers: shared hit=20 read=1
  Planning:
    Buffers: shared hit=76
- Planning Time: 0.205 ms
- Execution Time: 0.251 ms
+ Planning Time: 0.200 ms
+ Execution Time: 0.034 ms
 (8 rows)
 
 
@@ -158,32 +158,32 @@ probing user id: 1
 ---------------------------------------------------------------------
                                                                  QUERY PLAN                                                                  
 ---------------------------------------------------------------------------------------------------------------------------------------------
- Limit  (cost=10207.66..10207.71 rows=20 width=71) (actual time=90.407..90.410 rows=20 loops=1)
+ Limit  (cost=10206.04..10206.09 rows=20 width=71) (actual time=89.630..89.633 rows=20 loops=1)
    Buffers: shared hit=3412
-   ->  Sort  (cost=10207.66..10210.16 rows=1000 width=71) (actual time=90.406..90.408 rows=20 loops=1)
+   ->  Sort  (cost=10206.04..10208.54 rows=1000 width=71) (actual time=89.629..89.632 rows=20 loops=1)
          Sort Key: (COALESCE(sum(o.total_amount), '0'::numeric)) DESC
          Sort Method: top-N heapsort  Memory: 29kB
          Buffers: shared hit=3412
-         ->  HashAggregate  (cost=10168.55..10181.05 rows=1000 width=71) (actual time=90.097..90.251 rows=1002 loops=1)
+         ->  HashAggregate  (cost=10166.93..10179.43 rows=1000 width=71) (actual time=89.323..89.473 rows=1002 loops=1)
                Group Key: r.id
                Batches: 1  Memory Usage: 577kB
                Buffers: shared hit=3412
-               ->  Hash Right Join  (cost=34.50..7962.65 rows=294120 width=45) (actual time=0.197..55.736 rows=294017 loops=1)
+               ->  Hash Right Join  (cost=34.50..7962.23 rows=293960 width=45) (actual time=0.189..54.390 rows=294017 loops=1)
                      Hash Cond: (o.restaurant_id = r.id)
                      Buffers: shared hit=3412
-                     ->  Seq Scan on orders o  (cost=0.00..7152.81 rows=294120 width=22) (actual time=0.004..20.878 rows=294015 loops=1)
+                     ->  Seq Scan on orders o  (cost=0.00..7152.81 rows=293960 width=22) (actual time=0.003..20.462 rows=294015 loops=1)
                            Filter: ((status)::text = 'DELIVERED'::text)
                            Rows Removed by Filter: 6210
                            Buffers: shared hit=3400
-                     ->  Hash  (cost=22.00..22.00 rows=1000 width=31) (actual time=0.190..0.191 rows=1002 loops=1)
+                     ->  Hash  (cost=22.00..22.00 rows=1000 width=31) (actual time=0.183..0.184 rows=1002 loops=1)
                            Buckets: 1024  Batches: 1  Memory Usage: 71kB
                            Buffers: shared hit=12
-                           ->  Seq Scan on restaurants r  (cost=0.00..22.00 rows=1000 width=31) (actual time=0.007..0.085 rows=1002 loops=1)
+                           ->  Seq Scan on restaurants r  (cost=0.00..22.00 rows=1000 width=31) (actual time=0.007..0.086 rows=1002 loops=1)
                                  Buffers: shared hit=12
  Planning:
-   Buffers: shared hit=68
- Planning Time: 0.300 ms
- Execution Time: 90.432 ms
+   Buffers: shared hit=69
+ Planning Time: 0.302 ms
+ Execution Time: 89.653 ms
 (26 rows)
 
 
@@ -193,15 +193,15 @@ probing user id: 1
 =====================================================================
                                                                  QUERY PLAN                                                                 
 --------------------------------------------------------------------------------------------------------------------------------------------
- Limit  (cost=0.42..4.73 rows=3 width=34) (actual time=0.267..0.270 rows=3 loops=1)
+ Limit  (cost=0.42..4.73 rows=3 width=34) (actual time=2.744..2.749 rows=3 loops=1)
    Buffers: shared hit=4 read=2
-   ->  Index Scan using idx_audit_user_ts on wallet_audit_logs  (cost=0.42..4.73 rows=3 width=34) (actual time=0.267..0.269 rows=3 loops=1)
+   ->  Index Scan using idx_audit_user_ts on wallet_audit_logs  (cost=0.42..4.73 rows=3 width=34) (actual time=2.744..2.748 rows=3 loops=1)
          Index Cond: (user_id = 1)
          Buffers: shared hit=4 read=2
  Planning:
-   Buffers: shared hit=50
- Planning Time: 0.164 ms
- Execution Time: 0.274 ms
+   Buffers: shared hit=45
+ Planning Time: 0.181 ms
+ Execution Time: 2.754 ms
 (9 rows)
 
 
@@ -216,14 +216,14 @@ probing user id: 1
  orders_pkey                    | 6616 kB |          1
  idx_audit_user_ts              | 4648 kB |          9
  wallet_audit_logs_pkey         | 3320 kB |          0
- users_pkey                     | 2440 kB |     451424
- idx_active_user_order          | 152 kB  |         97
+ users_pkey                     | 2440 kB |     451414
+ idx_active_user_order          | 152 kB  |         86
  idx_mv_rest_perf_revenue       | 48 kB   |          1
- ux_mv_rest_perf                | 40 kB   |          0
+ restaurants_pkey               | 40 kB   |     301726
  idx_restaurants_active         | 40 kB   |          0
- restaurants_pkey               | 40 kB   |     301728
- verification_results_pkey      | 16 kB   |          0
+ ux_mv_rest_perf                | 40 kB   |          0
  checkout_attempts_pkey         | 16 kB   |          0
+ verification_results_pkey      | 16 kB   |          0
 (14 rows)
 
 
@@ -237,7 +237,7 @@ probing user id: 1
  wallet_audit_logs         | 19 MB      |      150231
  mv_restaurant_performance | 224 kB     |        1002
  restaurants               | 208 kB     |        1002
- checkout_attempts         | 168 kB     |         402
+ checkout_attempts         | 136 kB     |         391
  verification_results      | 32 kB      |          22
 (7 rows)
 
