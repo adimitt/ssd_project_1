@@ -123,7 +123,7 @@ That single line is also the clearest explanation of *how* `$geoNear` works.
 ## Measured result
 
 ```
-5 active drivers within 5000 m  (138 ms)
+1 driver returned from within 5000 m  (110 ms)
   nearest: driver 2290 at 48.4 m
 
 collection size    : 499,800 pings
@@ -182,3 +182,45 @@ If the result is empty it prints the two actual causes:
 6. `$geoNear` already sorts by distance — so why is there a `$sort` right after it?
 7. What does `GEO_NEAR_2DSPHERE` above 44 `IXSCAN`s tell you about the algorithm?
 8. Your indexed query was slower in wall-clock than the scan. Is the index wrong?
+
+
+---
+
+## Addendum — one driver, not five
+
+The brief reads: *"locate **the closest active driver** within a 5km radius of a
+restaurant's coordinates."* Singular, definite article, and the requirement is titled
+**"Nearest Active Driver"**.
+
+An earlier version of this pipeline ended in `{ $limit: 5 }` and returned the five nearest.
+That is what a real dispatcher wants — the closest driver may decline, so you hold a short
+candidate list — but it is **not what was asked for**. The default is now `1`:
+
+```js
+const N_DRIVERS = (typeof DRIVERS !== "undefined") ? DRIVERS : 1;
+...
+{ $limit: N_DRIVERS },
+```
+
+```bash
+mongosh bitestream mongo/02_workflow3_geonear.js                    # the closest driver
+mongosh bitestream --eval 'DRIVERS=5' -f mongo/02_workflow3_geonear.js   # five nearest
+```
+
+### Why the limit barely changes the cost — and why that is the interesting part
+
+`docsExamined` is ~44,600 whether the limit is 1 or 5. The `$group` that collapses many
+pings down to one row per driver sits **upstream** of the `$limit`, and it cannot know which
+driver is nearest until it has drained **every ping inside the 5 km radius**. So the radius
+sets the work, not the limit.
+
+If you genuinely only ever wanted the single nearest *ping* — not the nearest *driver* —
+you could drop the dedup entirely and let `$geoNear` short-circuit:
+
+```js
+[ { $geoNear: { ... } }, { $limit: 1 } ]     // ~271 docs examined instead of ~44,600
+```
+
+That is 160x cheaper, and it is the right shape **only** if duplicate pings from one driver
+are acceptable in the answer. Being able to explain that trade — the dedup is what costs,
+not the limit — is the substantive point in this workflow.

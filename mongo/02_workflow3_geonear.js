@@ -3,12 +3,20 @@
 // WORKFLOW 3 - NEAREST ACTIVE DRIVER
 //
 // PURPOSE
-//   Find the closest ACTIVE drivers within a 5 km radius of a restaurant, using $geoNear
-//   against the 2dsphere index on DriverPings.location.
+//   The brief: "locate the CLOSEST ACTIVE DRIVER within a 5km radius of a restaurant's
+//   coordinates." Singular. This pipeline therefore returns exactly ONE driver by default -
+//   the nearest active one - using $geoNear against the 2dsphere index on
+//   DriverPings.location.
+//
+//   Pass DRIVERS=n to widen it to the n nearest instead. A real dispatcher wants a short
+//   candidate list, because the closest driver may decline, and the query costs the same
+//   either way (the per-driver dedup below has to drain the whole radius regardless of the
+//   final $limit). But the assignment asks for one, so one is the default.
 //
 // RUN  (from the repository root)
 //   mongosh bitestream mongo/02_workflow3_geonear.js
 //   mongosh bitestream --eval 'RESTAURANT_ID=42'  -f mongo/02_workflow3_geonear.js
+//   mongosh bitestream --eval 'DRIVERS=5'         -f mongo/02_workflow3_geonear.js
 //   mongosh bitestream --eval 'EXPLAIN=true'      -f mongo/02_workflow3_geonear.js
 //
 // DEPENDS ON
@@ -52,6 +60,8 @@ function stageNames(node, acc) {
 
 const RID = (typeof RESTAURANT_ID !== "undefined") ? RESTAURANT_ID : 1;
 const RADIUS_M = (typeof RADIUS !== "undefined") ? RADIUS : 5000;
+// Default 1: the brief asks for "the closest active driver", singular.
+const N_DRIVERS = (typeof DRIVERS !== "undefined") ? DRIVERS : 1;
 const WANT_EXPLAIN = (typeof EXPLAIN !== "undefined") && EXPLAIN === true;
 
 print("");
@@ -75,6 +85,8 @@ print(`restaurant : ${RID} - ${menu.name} (${menu.city})`);
 print(`origin     : [lng ${origin.coordinates[0].toFixed(5)}, ` +
       `lat ${origin.coordinates[1].toFixed(5)}]`);
 print(`radius     : ${RADIUS_M} m`);
+print(`returning  : ${N_DRIVERS === 1 ? "the single closest active driver (per the brief)"
+                                      : N_DRIVERS + " nearest active drivers"}`);
 print("");
 
 // =====================================================================================
@@ -127,7 +139,8 @@ const pipeline = [
 
     // $group destroys ordering, so the winners must be re-sorted before the limit.
     { $sort: { distance_m: 1 } },
-    { $limit: 5 },
+    // ONE by default - the brief says "the closest active driver".
+    { $limit: N_DRIVERS },
     {
         $project: {
             _id: 0,
@@ -158,7 +171,8 @@ if (WANT_EXPLAIN) {
     const results = db.DriverPings.aggregate(pipeline).toArray();
     const ms = Date.now() - t0;
 
-    print(`--- ${results.length} active drivers within ${RADIUS_M} m  (${ms} ms)`);
+    print(`--- ${results.length} ${results.length === 1 ? "driver" : "drivers"}` +
+          ` returned from within ${RADIUS_M} m  (${ms} ms)`);
     print("");
     if (results.length === 0) {
         print("  NOTHING FOUND. The two usual causes:");

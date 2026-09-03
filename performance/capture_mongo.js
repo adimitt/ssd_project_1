@@ -87,11 +87,15 @@ const wf3Pipeline = [
     { $sort: { driver_id: 1, distance_m: 1 } },
     { $group: { _id: "$driver_id", distance_m: { $first: "$distance_m" } } },
     { $sort: { distance_m: 1 } },
-    { $limit: 5 },
+    // ONE, matching the shipped default in mongo/02_workflow3_geonear.js - the brief asks
+    // for "the closest active driver". The $limit barely affects the measurement either
+    // way: the per-driver $group upstream must drain the entire 5 km radius before any
+    // limit can apply, which is why docsExamined stays ~44k regardless.
+    { $limit: 1 },
 ];
 
 out.workflow3.description =
-    "Nearest 5 ACTIVE drivers within 5km of restaurant 1, deduplicated to one row per driver.";
+    "The closest ACTIVE driver within 5km of restaurant 1, deduplicated to one row per driver (brief: 'locate the closest active driver'). Pass DRIVERS=n to the workflow script for the n nearest instead.";
 out.workflow3.origin = origin.location;
 out.workflow3.pipeline = wf3Pipeline;
 out.workflow3.summary = summarise(db.DriverPings.explain("executionStats").aggregate(wf3Pipeline));

@@ -84,7 +84,7 @@ check "TTL index is single-field"        "$(mq 'const t=db.DriverPings.getIndexe
 check "3 collections have validators"    "$(mq '["Menus","Reviews","DriverPings"].filter(c=>{const i=db.getCollectionInfos({name:c})[0];return i&&i.options&&i.options.validator}).length')" '^3$'
 
 head_ "6. Workflows return real results"
-check "WF3 \$geoNear finds active drivers within 5km" "$(mq '
+check "WF3 \$geoNear returns a driver within 5km (index-backed probe)" "$(mq '
 const m=db.Menus.findOne({restaurant_id:1});
 db.DriverPings.aggregate([{$geoNear:{near:m.location,distanceField:"d",maxDistance:5000,
   spherical:true,key:"location",query:{status:"ACTIVE"}}},{$limit:5}]).toArray().length')" '^[1-9]'
