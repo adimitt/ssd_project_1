@@ -18,6 +18,6 @@ pymongo==4.17.0
 # Synthetic names, emails and review text. Seeded (Faker.seed(42)) for reproducibility.
 Faker==40.37.0
 
-# Only needed to regenerate docs/relational_erd.png via docs/make_erd.py.
-# The committed PNG means a grader never has to install this.
-matplotlib==3.10.6
+# Only needed if you want to regenerate docs/relational_erd.png. The committed PNG means a
+# grader never has to install this; leave it commented out unless you are redrawing the ERD.
+# matplotlib==3.10.6

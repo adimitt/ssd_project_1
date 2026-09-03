@@ -51,100 +51,91 @@ would additionally require ≥ 13, but this schema uses `BIGINT IDENTITY` (see �
 ## 2. Setup — empty machine to verified database
 
 ```bash
-# 0. Engines. Either use Docker …
-docker compose up -d
-
-#    … or run them natively (macOS):
-#    brew install postgresql@17 && brew services start postgresql@17
-#    export PATH="/opt/homebrew/opt/postgresql@17/bin:$PATH"
-#    psql -d postgres -c "CREATE ROLE bs LOGIN PASSWORD 'bs' CREATEDB;"
-#    psql -d postgres -c "CREATE DATABASE bitestream OWNER bs;"
+# 0. Engines. PostgreSQL 16/17 and MongoDB 7/8, running on localhost.
+#    macOS:
+#      brew install postgresql@17 && brew services start postgresql@17
+#      brew install mongodb-community && brew services start mongodb-community
+#      export PATH="/opt/homebrew/opt/postgresql@17/bin:$PATH"
+#    Then create the role and database:
+psql -d postgres -c "CREATE ROLE bs LOGIN PASSWORD 'bs' CREATEDB;"
+psql -d postgres -c "CREATE DATABASE bitestream OWNER bs;"
 
 # 1. Python dependencies
 python3 -m pip install -r data_generation/requirements.txt
 
-# 2. Connection settings (localhost defaults are already correct)
-cp .env.example .env
+# 2. Connection settings. Every script reads standard libpq / Mongo env vars;
+#    the localhost defaults below are already correct for the commands above.
+export PGHOST=127.0.0.1 PGPORT=5432 PGDATABASE=bitestream PGUSER=bs PGPASSWORD=bs
+export MONGO_URI=mongodb://127.0.0.1:27017
 
-# 3. Build everything, seed it, run all four workflows, and verify
-bash run_all.sh
-```
+# 3. Build, in dependency order. The order is not optional — see the note below.
+psql -f sql/01_schema_ddl.sql            # tables, types, PK/FK, CHECK constraints
+psql -f sql/03_triggers_and_audit.sql    # trigger BEFORE any data exists
+psql -f sql/04_stored_procedures.sql     # Workflow 1
+python3 data_generation/postgres_seeder.py   # COPY, then trigger-driven ledger, then VACUUM ANALYZE
+psql -f sql/02_indexes.sql               # indexes AFTER the bulk load
+psql -f sql/05_materialized_views.sql    # materialized view + refresh function/procedure
 
-`run_all.sh --quick` runs the identical pipeline at 2 % scale in a few seconds.
-
-### Running the pieces individually
-
-```bash
-export PGHOST=127.0.0.1 PGDATABASE=bitestream PGUSER=bs PGPASSWORD=bs
-
-psql -v ON_ERROR_STOP=1 -f sql/01_schema_ddl.sql
-psql -v ON_ERROR_STOP=1 -f sql/03_triggers_and_audit.sql     # BEFORE any data exists
-psql -v ON_ERROR_STOP=1 -f sql/04_stored_procedures.sql
-python3 data_generation/postgres_seeder.py                   # COPY, then rebuild indexes
-psql -v ON_ERROR_STOP=1 -f sql/02_indexes.sql
-psql -v ON_ERROR_STOP=1 -f sql/05_materialized_views.sql
-psql -f sql/06_window_analytics.sql                          # Workflow 2
-
+# 4. MongoDB
 mongosh bitestream mongo/01_collections_and_indexes.js
 python3 data_generation/mongo_seeder.py
-mongosh bitestream mongo/02_workflow3_geonear.js             # Workflow 3
-mongosh bitestream mongo/03_workflow4_facet.js               # Workflow 4
 
-psql -f sql/99_verification_suite.sql                        # 22 assertions
-python3 tests/test_repeatable_read.py                        # 6 concurrency assertions
+# 5. The four workflows
+psql -f sql/06_window_analytics.sql                  # Workflow 2
+mongosh bitestream mongo/02_workflow3_geonear.js     # Workflow 3
+mongosh bitestream mongo/03_workflow4_facet.js       # Workflow 4
+#   Workflow 1 is a procedure — call it:
+psql -c "CALL sp_execute_checkout(1, 1, 250.00, NULL, NULL);"
 ```
 
-> **Before the viva, re-run `python3 data_generation/mongo_seeder.py --pings-only`.**
-> `DriverPings` carries a 2-hour TTL index. Telemetry older than that is deleted
-> automatically, so a collection seeded yesterday will be empty when you demo.
+### Why that order, and not filename order
 
----
+| Step | Why it sits there |
+|---|---|
+| `03` before any data | The audit trigger must exist before the first row, which is what lets us say **every** ledger row was written by the trigger rather than inserted directly. |
+| Seeder before `02` | Loading 300k rows into a table that already carries six indexes is several times slower, and the partial UNIQUE index would abort the `COPY` midway. The seeder drops the analytics indexes, loads, then replays `sql/02_indexes.sql` itself. |
+| `VACUUM (ANALYZE)` last | Without fresh statistics the planner guesses and picks a Seq Scan; without `VACUUM`, `Heap Fetches` never reaches 0. The seeder runs it as its final step. |
+| Mongo indexes after the load | Building them first makes the load several times slower. `mongo_seeder.py` creates them last, TTL last of all, so nothing expires mid-load. |
+
+> **`data_generation/mongo_seeder.py` reads restaurant coordinates out of PostgreSQL.**
+> Seed PostgreSQL first or it will refuse to run, rather than invent ids that point at nothing.
 
 ## 3. What is in the repository
 
+Exactly the structure the assignment specifies — 17 files, nothing else.
+
 ```
-sql/01_schema_ddl.sql            4 tables, PK/FK, 11 CHECK constraints
-sql/02_indexes.sql               6 indexes: 4 partial, 2 covering, 1 partial-unique
-sql/03_triggers_and_audit.sql    audit trigger + 2 immutability guards + self-test
-sql/04_stored_procedures.sql     WORKFLOW 1 — sp_execute_checkout (transaction control)
-sql/05_materialized_views.sql    mv_restaurant_performance + REFRESH CONCURRENTLY
-sql/06_window_analytics.sql      WORKFLOW 2 — CTEs, window frames, DENSE_RANK
-sql/99_verification_suite.sql    22 PASS/FAIL assertions across every rubric item
-
-mongo/01_collections_and_indexes.js   validators + 2dsphere + TTL, driven by the schema map
-mongo/02_workflow3_geonear.js         WORKFLOW 3 — $geoNear, nearest active driver
-mongo/03_workflow4_facet.js           WORKFLOW 4 — $facet review analytics
-
-data_generation/postgres_seeder.py    500k relational rows
-data_generation/mongo_seeder.py       701k documents
-data_generation/requirements.txt      pinned dependencies
-
-docs/relational_erd.png          ERD, including the trigger edge and the partial index
-docs/mongo_schema_map.json       SINGLE SOURCE OF TRUTH for the Mongo schema
-docs/make_erd.py                 regenerates the ERD
-docs/filedocs/                   one deep-dive document per source file
-
-performance/postgres_explain_analyzes.txt   raw EXPLAIN (ANALYZE, BUFFERS, VERBOSE)
-performance/mongo_execution_stats.json      raw explain("executionStats")
-performance/capture_postgres.sh             regenerates the above
-performance/capture_mongo.sh / .js
-
-tests/test_repeatable_read.py    the two-session concurrency proof
-verify.sh                        31-point read-only health check (~15 s, no rebuild)
-run_all.sh                       full build + seed + verify, in dependency order
-docker-compose.yml               pinned PostgreSQL 17 + MongoDB 8
-ARCHITECTURE.md                  the design document this implementation follows
+README.md                                setup, assumptions, EXPLAIN plans (this file)
+docs/
+    relational_erd.png                   PostgreSQL schema diagram, annotated with the
+                                         partial unique index and the trigger direction
+    mongo_schema_map.json                document structures + $jsonSchema validators.
+                                         NOT documentation: mongo/01_collections_and_indexes.js
+                                         and mongo_seeder.py both READ this file, so the
+                                         database and this document cannot drift apart
+sql/
+    01_schema_ddl.sql                    4 tables, 11 CHECK constraints, PK/FK
+    02_indexes.sql                       6 indexes: 1 partial UNIQUE, 2 partial covering,
+                                         3 secondary
+    03_triggers_and_audit.sql            audit trigger + 2 immutability guards; ends with a
+                                         self-test that RAISEs if any of it is broken
+    04_stored_procedures.sql             Workflow 1 — sp_execute_checkout, REPEATABLE READ
+    05_materialized_views.sql            mv_restaurant_performance + REFRESH CONCURRENTLY,
+                                         as both a FUNCTION and a PROCEDURE
+    06_window_analytics.sql              Workflow 2 — CTEs, RANGE frames, DENSE_RANK
+mongo/
+    01_collections_and_indexes.js        collections, validators, 2dsphere, TTL 7200s;
+                                         asserts all four before it exits
+    02_workflow3_geonear.js              Workflow 3 — $geoNear, the closest active driver
+    03_workflow4_facet.js                Workflow 4 — $facet analytics
+data_generation/
+    postgres_seeder.py                   300k orders + 150k trigger-written ledger rows
+    mongo_seeder.py                      520k geospatial pings, 200k reviews, 1k menus
+    requirements.txt                     pinned Python dependencies
+performance/
+    postgres_explain_analyzes.txt        raw EXPLAIN (ANALYZE, BUFFERS, VERBOSE) logs
+    mongo_execution_stats.json           raw explain("executionStats") JSON
 ```
-
-**`docs/mongo_schema_map.json` is not documentation — it is the definition.**
-`mongo/01_collections_and_indexes.js` and `data_generation/mongo_seeder.py` both read it
-and apply it, so the schema map and the database cannot drift apart.
-
-**Per-file deep dives live in [`docs/filedocs/`](docs/filedocs/)** — one Markdown document
-per source file, covering every function, every constraint and every design decision.
-Start at [`docs/filedocs/README.md`](docs/filedocs/README.md).
-
----
 
 ## 4. Assumptions
 
@@ -200,8 +191,8 @@ Against the brief's Step 4 thresholds: **100,000+ ledger entries** (150,229 ✓)
 > The ping count is deliberately **520,000, not exactly 500,000**. Sitting on the threshold
 > is fragile: the TTL reaper begins deleting the moment the load finishes, so a live count
 > taken minutes later is already below it. The 4% margin makes the requirement unambiguous
-> at capture time. `verify.sh` asserts this table matches `performance/mongo_execution_stats.json`,
-> so the documented figure cannot drift from the measured one.
+> at capture time. The figure above is the one recorded in
+> `performance/mongo_execution_stats.json`.
 Full build time on the reference machine: **PostgreSQL ~11 s, MongoDB ~13 s.**
 
 **Every one of the 150,229 ledger rows was written by the trigger.** `COPY` does not fire
@@ -309,52 +300,63 @@ the leading `$match` in `mongo/03_workflow4_facet.js` is load-bearing, not styli
 
 ## 7. Verification
 
-```bash
-bash verify.sh                            # 31/31 PASS - read-only, ~15 s, no rebuild
-psql -f sql/99_verification_suite.sql     # 22/22 PASS
-python3 tests/test_repeatable_read.py     #  6/6  PASS
-```
+There is no separate test harness in this repository — the assignment's structure does not
+include one. Instead **the required scripts verify themselves**, and fail loudly rather than
+printing something reassuring and wrong.
 
-`verify.sh` is the fastest answer to "is it working?": it checks engine reachability, every
-schema object, data volumes against the brief's thresholds, the business rules holding in
-the actual data, the Mongo indexes, all three workflows returning real results, and the
-committed performance evidence. It exits non-zero on any failure, and it has been tested
-against a deliberately broken database to confirm it detects one.
-
-| Group | Covered |
+| Run this | What it asserts, and how it fails |
 |---|---|
-| T01–T06 | all six `sp_execute_checkout` outcomes |
-| T07–T09 | trigger: CREDIT, DEBIT, and no-op suppression via the `WHEN` clause |
-| T10–T11 | ledger immutability: `UPDATE` and `DELETE` both rejected |
-| T12–T12b | partial unique index blocks a 2nd active order, permits 500 `DELIVERED` |
-| T13–T15 | `CHECK` constraints on wallet, amount and status |
-| T16 | atomicity: a failed debit changes neither balance nor ledger |
-| T17–T18 | `REFRESH … CONCURRENTLY`; `LEFT JOIN` keeps zero-order restaurants |
-| T19–T19b | `ROWS` spans 10 calendar days where `RANGE` spans exactly 7 |
-| T20 | `DENSE_RANK` vs `RANK` on a tie |
-| A / B / C | REPEATABLE READ → 40001; READ COMMITTED → stale read; 8-thread contention |
+| `psql -f sql/03_triggers_and_audit.sql` | A `DO` block at the end credits a wallet, debits it, writes a **no-op** update, and tries to tamper with the ledger. It checks that exactly 2 rows were logged with the correct signs and `balance_after`, that the no-op produced **none**, and that the `UPDATE` was rejected. Everything is rolled back. Any failure raises and the script exits non-zero; success prints `self-test passed`. |
+| `python3 data_generation/postgres_seeder.py` | Prints a row-count table, then asserts the partial unique index actually holds in the generated data: **`users with >1 active order (must be 0)`**. Also reports how many ledger rows exist and that all were trigger-generated. |
+| `mongosh bitestream mongo/01_collections_and_indexes.js` | Asserts the 2dsphere index exists, the TTL is exactly **7200 s**, the TTL index is **single-field** (a compound TTL index is impossible and this catches an attempt), and all three collections carry validators. Throws on any failure. |
+| `mongosh bitestream mongo/02_workflow3_geonear.js` | Prints the plan stages and asserts `GEO_NEAR_2DSPHERE` is present and `COLLSCAN` is not — throwing if either check fails. Ends with a `verdict` line. |
+| `mongosh bitestream mongo/03_workflow4_facet.js` | Asserts `IXSCAN` and throws on `COLLSCAN` for the single-restaurant query. Run it with `--eval 'SCOPE="all"'` and it reports a `COLLSCAN` as **expected** — at that selectivity a full scan genuinely is the cheaper plan, and the script knows the difference. |
+| `python3 data_generation/mongo_seeder.py` | Reports the oldest ping's age against the TTL window, and runs a real `$geoNear` to confirm drivers are actually found — which catches the `[lat, lng]` coordinate-order bug that otherwise fails silently. |
 
-The strongest single assertion is the last one in `test_repeatable_read.py`:
-after eight threads contend on one wallet,
+### Exercising Workflow 1's failure paths by hand
 
+`sp_execute_checkout` returns a machine-readable status. Each of these should produce the
+outcome named, and **leave nothing behind**:
+
+```bash
+psql <<'SQL'
+INSERT INTO users (name, wallet_balance) VALUES ('demo', 500.00) RETURNING id AS u \gset
+SELECT id AS r FROM restaurants ORDER BY id LIMIT 1 \gset
+
+CALL sp_execute_checkout(:u, :r, 200.00,   NULL, NULL);   -- OK
+CALL sp_execute_checkout(:u, :r, 50.00,    NULL, NULL);   -- ACTIVE_ORDER_EXISTS  (23505)
+CALL sp_execute_checkout(:u, :r, 999999.00,NULL, NULL);   -- INSUFFICIENT_FUNDS   (23514)
+CALL sp_execute_checkout(:u, :r, -50.00,   NULL, NULL);   -- AMOUNT_INVALID       (22023)
+CALL sp_execute_checkout(:u, 99999999, 10.00, NULL, NULL);-- BAD_REFERENCE        (23503)
+CALL sp_execute_checkout(99999999, :r, 10.00, NULL, NULL);-- USER_NOT_FOUND
+
+-- After the failures: balance unchanged, no extra ledger row, no extra order.
+SELECT wallet_balance FROM users WHERE id = :u;
+SELECT count(*) FROM wallet_audit_logs WHERE user_id = :u;
+SQL
 ```
-final_balance == opening_balance + SUM(wallet_audit_logs.amount_changed)
+
+> **`CALL` must run in autocommit.** `sp_execute_checkout` controls its own transaction, so a
+> `CALL` nested inside a client-side `BEGIN` raises `2D000 invalid transaction termination`.
+> Note also that PostgreSQL rejects a **subquery as a `CALL` argument** — capture the id with
+> `\gset` first, as above.
+
+### Regenerating the performance evidence
+
+The two files in `performance/` are committed outputs. To reproduce them:
+
+```bash
+psql -c "SET random_page_cost = 1.1;" -c "VACUUM (ANALYZE) orders;" \
+     -c "EXPLAIN (ANALYZE, BUFFERS, VERBOSE) <the Workflow 2 daily CTE>" \
+     > performance/postgres_explain_analyzes.txt
+
+mongosh bitestream --quiet --eval 'EXPLAIN=true' -f mongo/02_workflow3_geonear.js \
+     > performance/mongo_execution_stats.json
 ```
 
-holds **exactly**. No code path can move money without the trigger recording it.
-
-### Two corrections our own tests forced
-
-1. **`RANGE` does not supply zeros for missing days.** It fixes the window *boundary* —
-   `ROWS BETWEEN 6 PRECEDING` reached back 10 calendar days in our fixture where
-   `RANGE BETWEEN INTERVAL '6 days' PRECEDING` reached back exactly 7 — but neither frame
-   invents a row for a day with no orders. Only the `generate_series` gap fill makes the
-   denominator 7. A correct 7-day moving average needs **both**, which is why
-   `sql/06_window_analytics.sql` does both. (T19 / T19b)
-2. **`CALL` rejects subqueries in its arguments** — `cannot use subquery in CALL argument`.
-   Fixture ids must be captured with `\gset` and passed as literals.
-
----
+`VACUUM (ANALYZE)` before capturing is not optional: without fresh statistics the planner
+picks a Seq Scan, and without `VACUUM` an Index Only Scan reports a large `Heap Fetches`
+count that makes a good plan look bad.
 
 ## 8. Known limitations
 
@@ -390,8 +392,8 @@ holds **exactly**. No code path can move money without the trigger recording it.
 
 ---
 
-## 9. Attribution
+## 9. Notes
 
-`ARCHITECTURE.md` is the design document; this repository is its implementation. Every
-non-obvious decision carries a **Why / Viva** comment in the source, and
-[`docs/filedocs/`](docs/filedocs/) explains each file end to end.
+The repository contains exactly the 17 files the assignment's structure specifies. Design
+rationale that would normally live in a separate document is kept as comments inside the file
+it applies to, so each script explains its own decisions where they are made.

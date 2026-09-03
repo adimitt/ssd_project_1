@@ -177,7 +177,7 @@ CREATE TRIGGER trg_audit_block_truncate
 --     2. a DEBIT is logged
 --     3. a no-op write produces NO ledger row  (the WHEN clause)
 --     4. UPDATE on the ledger is rejected      (the row guard)
---   Full coverage of all six checkout paths lives in sql/99_verification_suite.sql.
+--   The six sp_execute_checkout outcomes are exercised by hand; see README section 7.
 -- =====================================================================================
 DO $selftest$
 DECLARE
